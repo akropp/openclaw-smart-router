@@ -1,4 +1,5 @@
-// Ambient type declarations for runtime dependencies not installed in node_modules.
+// Ambient type declarations for runtime dependencies not installed locally.
+// These are provided by the OpenClaw gateway runtime.
 
 declare module 'better-sqlite3' {
   export interface RunResult {
@@ -39,70 +40,41 @@ declare module 'better-sqlite3' {
   export default BetterSqlite3;
 }
 
+// OpenClaw plugin SDK — types are resolved from the gateway's node_modules at runtime.
+// When developing outside the gateway tree, TypeScript needs these ambient declarations.
 declare module 'openclaw/plugin-sdk/plugin-entry' {
-  export interface PluginRequest {
-    method: string;
-    url: string;
-    path: string;
-    query: Record<string, string>;
-    params: Record<string, string>;
-    body: unknown;
-    headers: Record<string, string>;
+  export interface PluginEntryDefinition {
+    id: string;
+    name: string;
+    description: string;
+    configSchema?: unknown;
+    register(api: PluginRegistrationApi): void;
   }
 
-  export interface PluginResponse {
-    status(code: number): this;
-    json(body: unknown): void;
-    send(body: string): void;
-    setHeader(name: string, value: string): void;
-  }
-
-  export type RouteHandler = (req: PluginRequest, res: PluginResponse) => void | Promise<void>;
-
-  export interface PluginAPI {
-    registerHttpRoute(
-      method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
-      path: string,
-      handler: RouteHandler,
-    ): void;
-    log(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown): void;
-  }
-
-  export interface BeforeModelResolveContext {
-    requestId: string;
-    prompt: string;
-    agentId?: string;
-    sessionKey?: string;
-    defaultModel: string;
+  export interface PluginRegistrationApi {
     pluginConfig: unknown;
+    config: unknown;
+    logger: {
+      info(...args: unknown[]): void;
+      warn(...args: unknown[]): void;
+      error(...args: unknown[]): void;
+      debug(...args: unknown[]): void;
+    };
+    registerHook(
+      events: string | string[],
+      handler: (...args: unknown[]) => unknown,
+      opts?: { name?: string; description?: string },
+    ): void;
+    registerHttpRoute(params: {
+      path: string;
+      handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void | Promise<void>;
+      auth: 'gateway' | 'plugin';
+      match?: 'exact' | 'prefix';
+    }): void;
+    registerTool(tool: unknown, opts?: unknown): void;
+    registerService(service: unknown): void;
+    registerProvider(provider: unknown): void;
   }
 
-  export interface BeforeModelResolveResult {
-    modelOverride?: string;
-  }
-
-  export interface AgentEndContext {
-    requestId: string;
-    agentId?: string;
-    sessionKey?: string;
-    model: string;
-    latencyMs: number;
-    inputTokens?: number;
-    outputTokens?: number;
-    error?: string;
-  }
-
-  export interface PluginHooks {
-    before_model_resolve?: (
-      ctx: BeforeModelResolveContext,
-    ) => BeforeModelResolveResult | Promise<BeforeModelResolveResult>;
-    agent_end?: (ctx: AgentEndContext) => void | Promise<void>;
-  }
-
-  export interface PluginDefinition {
-    setup(api: PluginAPI): void | Promise<void>;
-    hooks: PluginHooks;
-  }
-
-  export function definePluginEntry(definition: PluginDefinition): PluginDefinition;
+  export function definePluginEntry(definition: PluginEntryDefinition): PluginEntryDefinition;
 }

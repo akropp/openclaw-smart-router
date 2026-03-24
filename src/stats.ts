@@ -118,8 +118,8 @@ export function queryStats(q: StatsQuery = {}): StatsResult {
     return emptyStats(period);
   }
 
-  const filters: string[] = [`datetime(timestamp) >= datetime('now', '-${periodSec} seconds')`];
-  const params: unknown[] = [];
+  const filters: string[] = [`datetime(timestamp) >= datetime('now', ? || ' seconds')`];
+  const params: unknown[] = [-periodSec];
 
   if (q.agent) { filters.push('agent_id = ?'); params.push(q.agent); }
   if (q.tier) { filters.push('tier = ?'); params.push(q.tier); }
@@ -173,8 +173,8 @@ export function queryDecisions(q: StatsQuery = {}): RoutingDecision[] {
   const periodSec = PERIOD_SECONDS[period] ?? PERIOD_SECONDS['24h']!;
   const limit = q.limit ?? 50;
 
-  const filters: string[] = [`datetime(timestamp) >= datetime('now', '-${periodSec} seconds')`];
-  const params: unknown[] = [];
+  const filters: string[] = [`datetime(timestamp) >= datetime('now', ? || ' seconds')`];
+  const params: unknown[] = [-periodSec];
 
   if (q.agent) { filters.push('agent_id = ?'); params.push(q.agent); }
   if (q.tier) { filters.push('tier = ?'); params.push(q.tier); }
@@ -223,8 +223,8 @@ export function queryDecisions(q: StatsQuery = {}): RoutingDecision[] {
 export function pruneOldDecisions(retentionDays: number): number {
   if (!db) return 0;
   const result = db.prepare(
-    `DELETE FROM routing_decisions WHERE datetime(timestamp) < datetime('now', '-${retentionDays} days')`,
-  ).run();
+    `DELETE FROM routing_decisions WHERE datetime(timestamp) < datetime('now', ? || ' days')`,
+  ).run(-retentionDays);
   return result.changes;
 }
 

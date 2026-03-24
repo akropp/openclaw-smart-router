@@ -233,9 +233,12 @@ Recent routing decisions.
 - `tier=<tier_name>` (optional)
 
 ### POST /smart-router/config
-Hot-patch config (ephemeral, resets on restart).
+Hot-patch config (applies immediately to in-memory config).
 
 **Body:** Partial config object (deep-merged with current).
+
+**Query params:**
+- `persist=true` — also write to `~/.openclaw/openclaw.json` (atomic read-modify-write of `plugins.entries.smart-router.config`). Without this flag, changes are ephemeral and reset on gateway restart.
 
 ### GET /smart-router/experiments
 List experiments.
@@ -316,7 +319,13 @@ smart-router/
 
 ## Implementation Notes
 
-- **No external dependencies** beyond `better-sqlite3` (already available in OpenClaw's Node environment). If not available, fall back to `sql.js` (pure JS SQLite).
+- **Dashboard has "Apply" (live only) and "Save" (persist to openclaw.json) buttons for config changes.
+
+- **Apply** — hot-patches runtime config, immediate effect, ephemeral
+- **Save** — does Apply + writes to openclaw.json so changes survive restarts
+- Config persistence uses atomic read-modify-write: read openclaw.json → deep-merge `plugins.entries.smart-router.config` → write to tmp file → rename
+
+No external dependencies** beyond `better-sqlite3` (already available in OpenClaw's Node environment). If not available, fall back to `sql.js` (pure JS SQLite).
 - **Scoring is synchronous** — must be fast (<2ms). No LLM calls for classification.
 - **Config schema** uses TypeBox (OpenClaw's schema library) for validation.
 - **Dashboard** is a single inlined HTML string — no build tooling, no asset serving.
