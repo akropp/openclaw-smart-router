@@ -5,7 +5,9 @@
   "description": "Intelligent LLM routing for OpenClaw — score prompt complexity and route to cost-effective models",
   "license": "MIT",
   "openclaw": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "scripts": {
     "build": "tsc",
@@ -13,7 +15,8 @@
     "test": "node --test dist/test/*.test.js"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "@sinclair/typebox": "^0.34.0"
+    "@sinclair/typebox": "^0.34.0",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.7.0"
   }
 }

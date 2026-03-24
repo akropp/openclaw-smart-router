@@ -1,0 +1,4 @@
+.agent-task.md
+node_modules/
+dist/
+*.db
