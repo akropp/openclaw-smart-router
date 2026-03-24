@@ -160,7 +160,8 @@ export function renderDashboard(): string {
   <div class="card-title">Edit and save to hot-patch runtime config (resets on restart)</div>
   <textarea id="configEditor" placeholder="Loading config&hellip;"></textarea>
   <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-    <button onclick="saveConfig()">Save Config</button>
+    <button onclick="applyConfig()">Apply (live only)</button>
+    <button onclick="persistConfig()" style="background:var(--green);color:#000;">Save to disk</button>
     <div id="configMsg"></div>
   </div>
 </div>
@@ -306,14 +307,33 @@ async function loadExperiments() {
   } catch(e) { console.error('experiments load error', e); }
 }
 
-async function saveConfig() {
+async function applyConfig() {
   const msgEl = document.getElementById('configMsg');
   try {
     const patch = JSON.parse(document.getElementById('configEditor').value);
     await apiFetch('/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(patch) });
     msgEl.className = 'msg msg-ok';
-    msgEl.textContent = 'Config saved successfully';
-    setTimeout(() => msgEl.textContent = '', 3000);
+    msgEl.textContent = 'Applied (live only — resets on restart)';
+    setTimeout(() => msgEl.textContent = '', 4000);
+  } catch(e) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function persistConfig() {
+  const msgEl = document.getElementById('configMsg');
+  try {
+    const patch = JSON.parse(document.getElementById('configEditor').value);
+    const r = await apiFetch('/config?persist=true', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(patch) });
+    if (r.persisted) {
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = 'Saved to openclaw.json \\u2714';
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = 'Applied in memory but failed to write to disk: ' + (r.warning || 'unknown error');
+    }
+    setTimeout(() => msgEl.textContent = '', 5000);
   } catch(e) {
     msgEl.className = 'msg msg-err';
     msgEl.textContent = 'Error: ' + e.message;

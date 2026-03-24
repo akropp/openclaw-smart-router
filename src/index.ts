@@ -42,32 +42,34 @@ export default definePluginEntry({
     // Register before_model_resolve hook — the core routing logic
     api.registerHook(
       'before_model_resolve',
-      (event: { prompt: string }, ctx: { agentId?: string; sessionKey?: string; trigger?: string }) => {
+      (event: unknown, ctx: unknown) => {
+        const { prompt } = event as { prompt: string };
+        const { agentId, sessionKey } = (ctx ?? {}) as { agentId?: string; sessionKey?: string };
         const cfg = getConfig();
 
         // Skip if plugin disabled
         if (!cfg.enabled) return {};
 
         // Skip excluded agents
-        if (ctx.agentId && cfg.excludeAgents.includes(ctx.agentId)) return {};
+        if (agentId && cfg.excludeAgents.includes(agentId)) return {};
 
         // Skip excluded session patterns
-        if (ctx.sessionKey && matchesAnyPattern(ctx.sessionKey, cfg.excludeSessionPatterns)) return {};
+        if (sessionKey && matchesAnyPattern(sessionKey, cfg.excludeSessionPatterns)) return {};
 
         // Score the prompt
-        const scoringResult = scorePrompt(event.prompt, cfg.scoring);
+        const scoringResult = scorePrompt(prompt, cfg.scoring);
 
-        // Route to model
-        const routingResult = route(scoringResult, cfg, ctx.agentId);
+        // Route to model (with session momentum)
+        const routingResult = route(scoringResult, cfg, agentId, sessionKey, prompt);
 
         // Record decision (fire-and-forget)
         if (cfg.stats.enabled && isDbEnabled()) {
           try {
             insertDecision({
-              agentId: ctx.agentId,
-              sessionKey: ctx.sessionKey,
-              promptPreview: event.prompt.slice(0, 100),
-              promptLength: event.prompt.length,
+              agentId,
+              sessionKey,
+              promptPreview: prompt.slice(0, 100),
+              promptLength: prompt.length,
               complexityScore: scoringResult.score,
               tier: routingResult.tier,
               modelChosen: routingResult.model,
