@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw/smart-router",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Intelligent LLM routing for OpenClaw — score prompt complexity and route to cost-effective models",
+  "license": "MIT",
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@sinclair/typebox": "^0.34.0"
+  }
+}

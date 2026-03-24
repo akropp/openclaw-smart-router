@@ -1,0 +1,84 @@
+{
+  "id": "smart-router",
+  "name": "Smart Router",
+  "description": "Score prompt complexity and route to cost-effective models automatically",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": { "type": "boolean", "default": true },
+      "defaultTier": { "type": "string", "default": "standard" },
+      "tiers": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "description": { "type": "string" }
+          },
+          "required": ["model"]
+        }
+      },
+      "agentOverrides": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "excludeAgents": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": []
+      },
+      "excludeSessionPatterns": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["cron:*"]
+      },
+      "scoring": {
+        "type": "object",
+        "properties": {
+          "weights": {
+            "type": "object",
+            "properties": {
+              "length": { "type": "number", "default": 0.15 },
+              "code": { "type": "number", "default": 0.25 },
+              "question": { "type": "number", "default": 0.25 },
+              "keywords": { "type": "number", "default": 0.2 },
+              "structure": { "type": "number", "default": 0.15 }
+            }
+          },
+          "thresholds": {
+            "type": "object",
+            "properties": {
+              "trivial": { "type": "number", "default": 0.2 },
+              "standard": { "type": "number", "default": 0.5 },
+              "complex": { "type": "number", "default": 0.8 }
+            }
+          }
+        }
+      },
+      "stats": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "dbPath": { "type": "string" },
+          "retentionDays": { "type": "number", "default": 30 }
+        }
+      },
+      "experiments": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false }
+        }
+      },
+      "dashboard": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      }
+    },
+    "additionalProperties": false
+  }
+}
