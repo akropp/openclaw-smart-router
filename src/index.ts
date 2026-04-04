@@ -185,7 +185,8 @@ export default function register(api: PluginApi): void {
     match: 'prefix',
   });
 
-  // Dashboard
+  // Dashboard — auth: 'plugin' so it's accessible without gateway token
+  // (the dashboard is read-only; API routes still use gateway auth)
   api.registerHttpRoute({
     path: '/smart-router/dashboard',
     handler: (_req: IncomingMessage, res: ServerResponse) => {
@@ -197,7 +198,7 @@ export default function register(api: PluginApi): void {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(renderDashboard());
     },
-    auth: 'gateway',
+    auth: 'plugin',
   });
 
   api.logger.info('[smart-router] Plugin registered');

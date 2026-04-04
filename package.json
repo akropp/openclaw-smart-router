@@ -18,5 +18,8 @@
     "@sinclair/typebox": "^0.34.0",
     "@types/node": "^25.5.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0"
   }
 }

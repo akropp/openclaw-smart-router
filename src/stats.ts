@@ -81,8 +81,10 @@ export function initDb(dbPath: string): boolean {
   }
 
   try {
-    // Dynamic require – better-sqlite3 is a native module provided by OpenClaw runtime
-    const BetterSqlite3 = (_require('better-sqlite3') as { default: DatabaseConstructor }).default;
+    // Dynamic require – better-sqlite3 is a native module.
+    // Jiti may return the constructor directly or wrapped in { default }.
+    const mod = _require('better-sqlite3') as DatabaseConstructor | { default: DatabaseConstructor };
+    const BetterSqlite3 = typeof mod === 'function' ? mod : mod.default;
     db = new BetterSqlite3(resolvedPath);
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
