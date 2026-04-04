@@ -181,11 +181,11 @@ export default function register(api: PluginApi): void {
 
   // Register HTTP routes
   const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => void }> = [
-    { path: '/smart-router/stats', handler: wrapJsonHandler(handleStats) },
-    { path: '/smart-router/decisions', handler: wrapJsonHandler(handleDecisions) },
-    { path: '/smart-router/config', handler: wrapJsonHandler(handleConfigPatch, handleConfigGet) },
-    { path: '/smart-router/experiments', handler: wrapJsonHandler(handleExperimentsCreate, handleExperimentsGet) },
-    { path: '/smart-router/bump', handler: wrapJsonHandler(handleBumpApi) },
+    { path: '/plugins/smart-router/stats', handler: wrapJsonHandler(handleStats) },
+    { path: '/plugins/smart-router/decisions', handler: wrapJsonHandler(handleDecisions) },
+    { path: '/plugins/smart-router/config', handler: wrapJsonHandler(handleConfigPatch, handleConfigGet) },
+    { path: '/plugins/smart-router/experiments', handler: wrapJsonHandler(handleExperimentsCreate, handleExperimentsGet) },
+    { path: '/plugins/smart-router/bump', handler: wrapJsonHandler(handleBumpApi) },
   ];
 
   for (const r of routes) {
@@ -194,7 +194,7 @@ export default function register(api: PluginApi): void {
 
   // Experiment stop (prefix match)
   api.registerHttpRoute({
-    path: '/smart-router/experiments/',
+    path: '/plugins/smart-router/experiments/',
     handler: wrapJsonHandler(handleExperimentsStop),
     auth: 'plugin',
     match: 'prefix',
@@ -203,7 +203,7 @@ export default function register(api: PluginApi): void {
   // Dashboard — auth: 'plugin' so it's accessible without gateway token
   // (the dashboard is read-only; API routes still use gateway auth)
   api.registerHttpRoute({
-    path: '/smart-router/dashboard',
+    path: '/plugins/smart-router/dashboard',
     handler: (_req: IncomingMessage, res: ServerResponse) => {
       if (!getConfig().dashboard.enabled) {
         res.writeHead(404, { 'Content-Type': 'application/json' });

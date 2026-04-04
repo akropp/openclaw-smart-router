@@ -207,7 +207,7 @@ export function renderDashboard(): string {
 </div>
 
 <script>
-const BASE = '/smart-router';
+const BASE = '/plugins/smart-router';
 let refreshTimer;
 
 async function apiFetch(path, opts) {
