@@ -49,9 +49,9 @@ interface PluginApi {
   [key: string]: unknown;
 }
 
-// Model-switch pin: when user explicitly switches model, honor it for a TTL
+// Model-switch pin: when user explicitly switches model, skip routing for a TTL
 const MODEL_SWITCH_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const modelSwitchPins = new Map<string, { tier: Tier | null; expiresAt: number }>();
+const modelSwitchPins = new Map<string, { expiresAt: number }>();
 
 export default function register(api: PluginApi): void {
   // Initialize config from plugin config section in openclaw.json
@@ -92,44 +92,21 @@ export default function register(api: PluginApi): void {
       // Skip excluded session patterns
       if (sessionKey && matchesAnyPattern(sessionKey, cfg.excludeSessionPatterns)) return {};
 
-      // Detect explicit model switch (e.g. "Model switched to opus") — honor it
-      const modelSwitchMatch = prompt.match(/Model switched to (\S+)/i);
-      if (modelSwitchMatch && sessionKey) {
-        const switchedTo = modelSwitchMatch[1].toLowerCase();
-        // Map common aliases to tiers
-        const aliasToTier: Record<string, Tier> = {
-          'opus': 'complex', 'claude-opus-4-6': 'complex',
-          'sonnet': 'standard', 'claude-sonnet-4-6': 'standard',
-          'haiku': 'trivial', 'claude-haiku-4-5': 'trivial',
-        };
-        // If switched to a known model, pin this session to that tier
-        const pinnedTier = aliasToTier[switchedTo];
-        if (pinnedTier) {
-          modelSwitchPins.set(sessionKey, { tier: pinnedTier, expiresAt: Date.now() + MODEL_SWITCH_TTL_MS });
-        } else {
-          // Unknown model or explicit full model string — skip routing entirely
-          modelSwitchPins.set(sessionKey, { tier: null, expiresAt: Date.now() + MODEL_SWITCH_TTL_MS });
-        }
+      // Detect explicit model switch (e.g. "Model switched to opus") — skip routing entirely
+      if (sessionKey && /Model switched to \S+/i.test(prompt)) {
+        modelSwitchPins.set(sessionKey, { expiresAt: Date.now() + MODEL_SWITCH_TTL_MS });
+        return {}; // Let the user's explicit choice pass through unmodified
       }
 
-      // Check for active model-switch pin on this session
-      const pin = sessionKey ? modelSwitchPins.get(sessionKey) : undefined;
-      if (pin) {
-        if (Date.now() > pin.expiresAt) {
-          modelSwitchPins.delete(sessionKey!);
-        } else if (pin.tier === null) {
-          // Pinned to a non-standard model — skip routing entirely
-          return {};
-        } else {
-          // Use pinned tier
-          const syntheticScore = { score: pin.tier === 'trivial' ? 0.1 : pin.tier === 'complex' ? 0.9 : 0.4, tier: pin.tier, signals: {} as any };
-          const routingResult = route(syntheticScore, cfg, agentId, sessionKey, prompt);
-          const fullModel = routingResult.model;
-          const slashIdx = fullModel.indexOf('/');
-          if (slashIdx > 0) {
-            return { providerOverride: fullModel.slice(0, slashIdx), modelOverride: fullModel.slice(slashIdx + 1) };
+      // Check for active model-switch pin — user explicitly chose a model, don't override
+      if (sessionKey) {
+        const pin = modelSwitchPins.get(sessionKey);
+        if (pin) {
+          if (Date.now() > pin.expiresAt) {
+            modelSwitchPins.delete(sessionKey);
+          } else {
+            return {}; // Still honoring the explicit switch
           }
-          return { modelOverride: fullModel };
         }
       }
 
