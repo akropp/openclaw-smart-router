@@ -1,4 +1,11 @@
-import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
+/**
+ * smart-router — OpenClaw plugin for intelligent LLM routing.
+ *
+ * Uses the plain `export default function register(api)` pattern
+ * (no openclaw/plugin-sdk import) for maximum compatibility with
+ * linked plugins outside the gateway source tree.
+ */
+
 import { scorePrompt } from './scorer.js';
 import { route } from './router.js';
 import { initConfig, getConfig } from './config.js';
@@ -13,187 +20,188 @@ import type { Tier } from './types.js';
 
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
-export default definePluginEntry({
-  id: 'smart-router',
-  name: 'Smart Router',
-  description: 'Score prompt complexity and route to cost-effective models automatically',
+// Plugin API interface (matches what OpenClaw actually passes)
+interface PluginApi {
+  pluginConfig?: Record<string, unknown>;
+  config?: unknown;
+  logger: {
+    info(...args: unknown[]): void;
+    warn(...args: unknown[]): void;
+    error(...args: unknown[]): void;
+    debug(...args: unknown[]): void;
+  };
+  registerHook(
+    events: string | string[],
+    handler: (...args: unknown[]) => unknown,
+    opts?: { name?: string; description?: string },
+  ): void;
+  registerHttpRoute(params: {
+    path: string;
+    handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
+    auth: 'gateway' | 'plugin';
+    match?: 'exact' | 'prefix';
+  }): void;
+  [key: string]: unknown;
+}
 
-  register(api) {
-    // Initialize config from plugin config section in openclaw.json
-    initConfig(api.pluginConfig ?? {});
+export default function register(api: PluginApi): void {
+  // Initialize config from plugin config section in openclaw.json
+  initConfig(api.pluginConfig ?? {});
 
-    // Initialize stats DB
-    const cfg = getConfig();
-    if (cfg.stats.enabled) {
-      const ok = initDb(cfg.stats.dbPath);
-      if (ok) {
-        api.logger.info('[smart-router] Stats DB initialized');
-        const pruned = pruneOldDecisions(cfg.stats.retentionDays);
-        if (pruned > 0) api.logger.info(`[smart-router] Pruned ${pruned} old decisions`);
-        const timer = setInterval(() => {
-          const count = pruneOldDecisions(getConfig().stats.retentionDays);
-          if (count > 0) api.logger.info(`[smart-router] Pruned ${count} old decisions`);
-        }, PRUNE_INTERVAL_MS);
-        if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-      } else {
-        api.logger.warn('[smart-router] Stats DB unavailable — routing continues without persistence');
+  // Initialize stats DB
+  const cfg = getConfig();
+  if (cfg.stats.enabled) {
+    const ok = initDb(cfg.stats.dbPath);
+    if (ok) {
+      api.logger.info('[smart-router] Stats DB initialized');
+      const pruned = pruneOldDecisions(cfg.stats.retentionDays);
+      if (pruned > 0) api.logger.info(`[smart-router] Pruned ${pruned} old decisions`);
+      const timer = setInterval(() => {
+        const count = pruneOldDecisions(getConfig().stats.retentionDays);
+        if (count > 0) api.logger.info(`[smart-router] Pruned ${count} old decisions`);
+      }, PRUNE_INTERVAL_MS);
+      if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+    } else {
+      api.logger.warn('[smart-router] Stats DB unavailable — routing continues without persistence');
+    }
+  }
+
+  // Register before_model_resolve hook — the core routing logic (async for LLM classifier)
+  api.registerHook(
+    'before_model_resolve',
+    async (event: unknown, ctx: unknown) => {
+      const { prompt } = event as { prompt: string };
+      const { agentId, sessionKey } = (ctx ?? {}) as { agentId?: string; sessionKey?: string };
+      const cfg = getConfig();
+
+      // Skip if plugin disabled
+      if (!cfg.enabled) return {};
+
+      // Skip excluded agents
+      if (agentId && cfg.excludeAgents.includes(agentId)) return {};
+
+      // Skip excluded session patterns
+      if (sessionKey && matchesAnyPattern(sessionKey, cfg.excludeSessionPatterns)) return {};
+
+      // Check if user sent /bump — register it and let the message through
+      const bumpCheck = isBumpCommand(prompt);
+      if (bumpCheck.isBump && sessionKey) {
+        registerBump(sessionKey, bumpCheck.tier);
+        return {};
       }
-    }
 
-    // Register before_model_resolve hook — the core routing logic (async for LLM classifier)
-    api.registerHook(
-      'before_model_resolve',
-      async (event: unknown, ctx: unknown) => {
-        const { prompt } = event as { prompt: string };
-        const { agentId, sessionKey } = (ctx ?? {}) as { agentId?: string; sessionKey?: string };
-        const cfg = getConfig();
+      // Check for pending bump
+      let classifier: 'heuristic' | 'llm' | 'bump' = 'heuristic';
+      let forcedTier: Tier | null = null;
 
-        // Skip if plugin disabled
-        if (!cfg.enabled) return {};
+      if (sessionKey) {
+        forcedTier = consumeBump(sessionKey);
+        if (forcedTier) classifier = 'bump';
+      }
 
-        // Skip excluded agents
-        if (agentId && cfg.excludeAgents.includes(agentId)) return {};
+      // Score the prompt with heuristics
+      const scoringResult = scorePrompt(prompt, cfg.scoring);
+      let llmTier: Tier | null = null;
 
-        // Skip excluded session patterns
-        if (sessionKey && matchesAnyPattern(sessionKey, cfg.excludeSessionPatterns)) return {};
+      // If no bump override, and LLM classifier is enabled, check ambiguous band
+      if (!forcedTier && cfg.llmClassifier.enabled) {
+        const score = scoringResult.score;
+        const { confidentTrivialThreshold, confidentComplexThreshold } = cfg.llmClassifier;
 
-        // Check if user sent /bump — register it and let the message through
-        // (The bump will be consumed on the *next* agent run, not this one,
-        // since /bump itself shouldn't trigger a full agent response)
-        const bumpCheck = isBumpCommand(prompt);
-        if (bumpCheck.isBump && sessionKey) {
-          registerBump(sessionKey, bumpCheck.tier);
-          // Don't override model for the /bump command itself
-          return {};
-        }
-
-        // Check for pending bump (from a previous /bump command)
-        let classifier: 'heuristic' | 'llm' | 'bump' = 'heuristic';
-        let forcedTier: Tier | null = null;
-
-        if (sessionKey) {
-          forcedTier = consumeBump(sessionKey);
-          if (forcedTier) {
-            classifier = 'bump';
-          }
-        }
-
-        // Score the prompt with heuristics
-        const scoringResult = scorePrompt(prompt, cfg.scoring);
-        let llmTier: Tier | null = null;
-
-        // If no bump override, and LLM classifier is enabled, check ambiguous band
-        if (!forcedTier && cfg.llmClassifier.enabled) {
-          const score = scoringResult.score;
-          const { confidentTrivialThreshold, confidentComplexThreshold } = cfg.llmClassifier;
-
-          // Only call LLM for ambiguous scores
-          if (score > confidentTrivialThreshold && score < confidentComplexThreshold) {
-            try {
-              llmTier = await classifyWithCache(
-                { prompt },
-                cfg.llmClassifier,
-              );
-              if (llmTier) {
-                // Override the heuristic tier with LLM's judgment
-                scoringResult.tier = llmTier;
-                classifier = 'llm';
-              }
-            } catch {
-              // Fall back to heuristic on any error
-            }
-          }
-        }
-
-        // If bump is active, override the tier
-        if (forcedTier) {
-          scoringResult.tier = forcedTier;
-        }
-
-        // Route to model (with session momentum)
-        const routingResult = route(scoringResult, cfg, agentId, sessionKey, prompt);
-
-        // Record bump feedback if applicable
-        if (classifier === 'bump' && sessionKey && forcedTier) {
-          recordBump(
-            sessionKey,
-            agentId,
-            scoringResult.tier,  // what heuristic would have chosen
-            forcedTier,
-            prompt.slice(0, 100),
-            scoringResult.score,
-          );
-        }
-
-        // Record decision
-        if (cfg.stats.enabled && isDbEnabled()) {
+        if (score > confidentTrivialThreshold && score < confidentComplexThreshold) {
           try {
-            insertDecision({
-              agentId,
-              sessionKey,
-              promptPreview: prompt.slice(0, 100),
-              promptLength: prompt.length,
-              complexityScore: scoringResult.score,
-              tier: routingResult.tier,
-              rawTier: routingResult.rawTier,
-              llmTier,
-              modelChosen: routingResult.model,
-              signals: scoringResult.signals,
-              classifier,
-              experimentId: routingResult.experimentId,
-              experimentVariant: routingResult.experimentVariant,
-            });
+            llmTier = await classifyWithCache({ prompt }, cfg.llmClassifier);
+            if (llmTier) {
+              scoringResult.tier = llmTier;
+              classifier = 'llm';
+            }
           } catch {
-            // Never let stats errors affect routing
+            // Fall back to heuristic
           }
         }
+      }
 
-        return { modelOverride: routingResult.model };
-      },
-    );
+      // Apply bump override
+      if (forcedTier) {
+        scoringResult.tier = forcedTier;
+      }
 
-    // Register agent_end hook (placeholder for future telemetry)
-    api.registerHook('agent_end', () => {});
+      // Route to model (with session momentum)
+      const routingResult = route(scoringResult, cfg, agentId, sessionKey, prompt);
 
-    // Register HTTP routes
-    const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => void }> = [
-      { path: '/smart-router/stats', handler: wrapJsonHandler(handleStats) },
-      { path: '/smart-router/decisions', handler: wrapJsonHandler(handleDecisions) },
-      { path: '/smart-router/config', handler: wrapJsonHandler(handleConfigPatch, handleConfigGet) },
-      { path: '/smart-router/experiments', handler: wrapJsonHandler(handleExperimentsCreate, handleExperimentsGet) },
-      { path: '/smart-router/bump', handler: wrapJsonHandler(handleBumpApi) },
-    ];
+      // Record bump feedback
+      if (classifier === 'bump' && sessionKey && forcedTier) {
+        recordBump(sessionKey, agentId, scoringResult.tier, forcedTier, prompt.slice(0, 100), scoringResult.score);
+      }
 
-    for (const r of routes) {
-      api.registerHttpRoute({ path: r.path, handler: r.handler, auth: 'gateway' });
-    }
-
-    // Experiment stop (prefix match for :id param)
-    api.registerHttpRoute({
-      path: '/smart-router/experiments/',
-      handler: wrapJsonHandler(handleExperimentsStop),
-      auth: 'gateway',
-      match: 'prefix',
-    });
-
-    // Dashboard
-    api.registerHttpRoute({
-      path: '/smart-router/dashboard',
-      handler: (_req: IncomingMessage, res: ServerResponse) => {
-        if (!getConfig().dashboard.enabled) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Dashboard disabled' }));
-          return;
+      // Record decision
+      if (cfg.stats.enabled && isDbEnabled()) {
+        try {
+          insertDecision({
+            agentId,
+            sessionKey,
+            promptPreview: prompt.slice(0, 100),
+            promptLength: prompt.length,
+            complexityScore: scoringResult.score,
+            tier: routingResult.tier,
+            rawTier: routingResult.rawTier,
+            llmTier,
+            modelChosen: routingResult.model,
+            signals: scoringResult.signals,
+            classifier,
+            experimentId: routingResult.experimentId,
+            experimentVariant: routingResult.experimentVariant,
+          });
+        } catch {
+          // Never let stats errors affect routing
         }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(renderDashboard());
-      },
-      auth: 'gateway',
-    });
+      }
 
-    api.logger.info('[smart-router] Plugin registered');
-  },
-});
+      return { modelOverride: routingResult.model };
+    },
+  );
+
+  // Register agent_end hook (placeholder for future telemetry)
+  api.registerHook('agent_end', () => {});
+
+  // Register HTTP routes
+  const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => void }> = [
+    { path: '/smart-router/stats', handler: wrapJsonHandler(handleStats) },
+    { path: '/smart-router/decisions', handler: wrapJsonHandler(handleDecisions) },
+    { path: '/smart-router/config', handler: wrapJsonHandler(handleConfigPatch, handleConfigGet) },
+    { path: '/smart-router/experiments', handler: wrapJsonHandler(handleExperimentsCreate, handleExperimentsGet) },
+    { path: '/smart-router/bump', handler: wrapJsonHandler(handleBumpApi) },
+  ];
+
+  for (const r of routes) {
+    api.registerHttpRoute({ path: r.path, handler: r.handler, auth: 'gateway' });
+  }
+
+  // Experiment stop (prefix match)
+  api.registerHttpRoute({
+    path: '/smart-router/experiments/',
+    handler: wrapJsonHandler(handleExperimentsStop),
+    auth: 'gateway',
+    match: 'prefix',
+  });
+
+  // Dashboard
+  api.registerHttpRoute({
+    path: '/smart-router/dashboard',
+    handler: (_req: IncomingMessage, res: ServerResponse) => {
+      if (!getConfig().dashboard.enabled) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Dashboard disabled' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderDashboard());
+    },
+    auth: 'gateway',
+  });
+
+  api.logger.info('[smart-router] Plugin registered');
+}
 
 // ---------- Helpers ----------
 
@@ -253,16 +261,12 @@ export interface ParsedRequest {
 export class JsonResponse {
   private _status = 200;
   constructor(private res: ServerResponse) {}
-
   status(code: number): this { this._status = code; return this; }
-
   json(data: unknown): void {
     this.res.writeHead(this._status, { 'Content-Type': 'application/json' });
     this.res.end(JSON.stringify(data));
   }
-
   setHeader(name: string, value: string): void { this.res.setHeader(name, value); }
-
   send(body: string): void {
     this.res.writeHead(this._status);
     this.res.end(body);
