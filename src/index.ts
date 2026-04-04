@@ -174,14 +174,14 @@ export default function register(api: PluginApi): void {
   ];
 
   for (const r of routes) {
-    api.registerHttpRoute({ path: r.path, handler: r.handler, auth: 'gateway' });
+    api.registerHttpRoute({ path: r.path, handler: r.handler, auth: 'plugin' });
   }
 
   // Experiment stop (prefix match)
   api.registerHttpRoute({
     path: '/smart-router/experiments/',
     handler: wrapJsonHandler(handleExperimentsStop),
-    auth: 'gateway',
+    auth: 'plugin',
     match: 'prefix',
   });
 
