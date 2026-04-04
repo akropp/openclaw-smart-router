@@ -35,6 +35,11 @@ interface PluginApi {
     handler: (...args: unknown[]) => unknown,
     opts?: { name?: string; description?: string },
   ): void;
+  on(
+    hookName: string,
+    handler: (...args: unknown[]) => unknown,
+    opts?: { name?: string; description?: string },
+  ): void;
   registerHttpRoute(params: {
     path: string;
     handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
@@ -67,7 +72,7 @@ export default function register(api: PluginApi): void {
   }
 
   // Register before_model_resolve hook — the core routing logic (async for LLM classifier)
-  api.registerHook(
+  api.on(
     'before_model_resolve',
     async (event: unknown, ctx: unknown) => {
       const { prompt } = event as { prompt: string };
@@ -157,12 +162,22 @@ export default function register(api: PluginApi): void {
         }
       }
 
-      return { modelOverride: routingResult.model };
+      // Split provider/model — the hook expects them separate
+      const fullModel = routingResult.model;
+      const slashIdx = fullModel.indexOf('/');
+      if (slashIdx > 0) {
+        return {
+          providerOverride: fullModel.slice(0, slashIdx),
+          modelOverride: fullModel.slice(slashIdx + 1),
+        };
+      }
+      return { modelOverride: fullModel };
     },
+    { name: 'smart-router:before_model_resolve', description: 'Score prompt complexity and route to cost-effective models' },
   );
 
   // Register agent_end hook (placeholder for future telemetry)
-  api.registerHook('agent_end', () => {});
+  api.on('agent_end', () => {}, { name: 'smart-router:agent_end', description: 'Telemetry placeholder' });
 
   // Register HTTP routes
   const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => void }> = [

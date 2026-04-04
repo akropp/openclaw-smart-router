@@ -5,99 +5,150 @@
   "configSchema": {
     "type": "object",
     "properties": {
-      "enabled": { "type": "boolean", "default": true },
-      "defaultTier": { "type": "string", "default": "standard" },
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "defaultTier": {
+        "type": "string",
+        "default": "standard"
+      },
       "tiers": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "object",
-          "properties": {
-            "model": { "type": "string" },
-            "description": { "type": "string" }
-          },
-          "required": ["model"]
-        }
+        "type": "object"
       },
       "agentOverrides": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "object",
-          "additionalProperties": { "type": "string" }
-        }
+        "type": "object"
       },
       "excludeAgents": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": []
       },
       "excludeSessionPatterns": {
         "type": "array",
-        "items": { "type": "string" },
-        "default": ["cron:*"]
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          "cron:*"
+        ]
       },
       "scoring": {
         "type": "object",
         "properties": {
-          "shortMessageThreshold": { "type": "number", "default": 20 },
+          "shortMessageThreshold": {
+            "type": "number",
+            "default": 20
+          },
           "weights": {
             "type": "object",
             "properties": {
-              "length": { "type": "number", "default": 0.15 },
-              "code": { "type": "number", "default": 0.25 },
-              "question": { "type": "number", "default": 0.25 },
-              "keywords": { "type": "number", "default": 0.2 },
-              "structure": { "type": "number", "default": 0.15 }
-            },
-            "additionalProperties": false
+              "length": {
+                "type": "number",
+                "default": 0.15
+              },
+              "code": {
+                "type": "number",
+                "default": 0.25
+              },
+              "question": {
+                "type": "number",
+                "default": 0.25
+              },
+              "keywords": {
+                "type": "number",
+                "default": 0.2
+              },
+              "structure": {
+                "type": "number",
+                "default": 0.15
+              }
+            }
           },
           "thresholds": {
             "type": "object",
             "properties": {
-              "trivial": { "type": "number", "default": 0.2 },
-              "standard": { "type": "number", "default": 0.5 },
-              "complex": { "type": "number", "default": 0.8 }
-            },
-            "additionalProperties": false
+              "trivial": {
+                "type": "number",
+                "default": 0.2
+              },
+              "standard": {
+                "type": "number",
+                "default": 0.5
+              },
+              "complex": {
+                "type": "number",
+                "default": 0.8
+              }
+            }
           }
-        },
-        "additionalProperties": false
+        }
       },
       "llmClassifier": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": false },
-          "ollamaUrl": { "type": "string", "default": "http://mac-mini.tailcd0984.ts.net:11434" },
-          "model": { "type": "string", "default": "gemma4:e4b" },
-          "timeoutMs": { "type": "number", "default": 1500 },
-          "confidentTrivialThreshold": { "type": "number", "default": 0.15 },
-          "confidentComplexThreshold": { "type": "number", "default": 0.85 }
-        },
-        "additionalProperties": false
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "ollamaUrl": {
+            "type": "string",
+            "default": "http://mac-mini.tailcd0984.ts.net:11434"
+          },
+          "model": {
+            "type": "string",
+            "default": "gemma4:e4b"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "default": 1500
+          },
+          "confidentTrivialThreshold": {
+            "type": "number",
+            "default": 0.15
+          },
+          "confidentComplexThreshold": {
+            "type": "number",
+            "default": 0.85
+          }
+        }
       },
       "stats": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": true },
-          "dbPath": { "type": "string" },
-          "retentionDays": { "type": "number", "default": 30 }
-        },
-        "additionalProperties": false
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "dbPath": {
+            "type": "string"
+          },
+          "retentionDays": {
+            "type": "number",
+            "default": 30
+          }
+        }
       },
       "experiments": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": false }
-        },
-        "additionalProperties": false
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          }
+        }
       },
       "dashboard": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": true }
-        },
-        "additionalProperties": false
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
       }
-    },
-    "additionalProperties": false
+    }
   }
 }
