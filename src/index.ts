@@ -3,10 +3,13 @@ import { scorePrompt } from './scorer.js';
 import { route } from './router.js';
 import { initConfig, getConfig } from './config.js';
 import { initDb, insertDecision, pruneOldDecisions, isDbEnabled } from './stats.js';
-import { handleStats, handleDecisions, handleConfigPatch, handleConfigGet, handleExperimentsGet, handleExperimentsCreate, handleExperimentsStop } from './api.js';
+import { classifyWithCache } from './llm-classifier.js';
+import { consumeBump, registerBump, recordBump, isBumpCommand } from './bump.js';
+import { handleStats, handleDecisions, handleConfigPatch, handleConfigGet, handleExperimentsGet, handleExperimentsCreate, handleExperimentsStop, handleBumpApi } from './api.js';
 import { renderDashboard } from './dashboard.js';
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Tier } from './types.js';
 
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -25,10 +28,8 @@ export default definePluginEntry({
       const ok = initDb(cfg.stats.dbPath);
       if (ok) {
         api.logger.info('[smart-router] Stats DB initialized');
-        // Initial prune
         const pruned = pruneOldDecisions(cfg.stats.retentionDays);
         if (pruned > 0) api.logger.info(`[smart-router] Pruned ${pruned} old decisions`);
-        // Schedule periodic prune
         const timer = setInterval(() => {
           const count = pruneOldDecisions(getConfig().stats.retentionDays);
           if (count > 0) api.logger.info(`[smart-router] Pruned ${count} old decisions`);
@@ -39,10 +40,10 @@ export default definePluginEntry({
       }
     }
 
-    // Register before_model_resolve hook — the core routing logic
+    // Register before_model_resolve hook — the core routing logic (async for LLM classifier)
     api.registerHook(
       'before_model_resolve',
-      (event: unknown, ctx: unknown) => {
+      async (event: unknown, ctx: unknown) => {
         const { prompt } = event as { prompt: string };
         const { agentId, sessionKey } = (ctx ?? {}) as { agentId?: string; sessionKey?: string };
         const cfg = getConfig();
@@ -56,13 +57,75 @@ export default definePluginEntry({
         // Skip excluded session patterns
         if (sessionKey && matchesAnyPattern(sessionKey, cfg.excludeSessionPatterns)) return {};
 
-        // Score the prompt
+        // Check if user sent /bump — register it and let the message through
+        // (The bump will be consumed on the *next* agent run, not this one,
+        // since /bump itself shouldn't trigger a full agent response)
+        const bumpCheck = isBumpCommand(prompt);
+        if (bumpCheck.isBump && sessionKey) {
+          registerBump(sessionKey, bumpCheck.tier);
+          // Don't override model for the /bump command itself
+          return {};
+        }
+
+        // Check for pending bump (from a previous /bump command)
+        let classifier: 'heuristic' | 'llm' | 'bump' = 'heuristic';
+        let forcedTier: Tier | null = null;
+
+        if (sessionKey) {
+          forcedTier = consumeBump(sessionKey);
+          if (forcedTier) {
+            classifier = 'bump';
+          }
+        }
+
+        // Score the prompt with heuristics
         const scoringResult = scorePrompt(prompt, cfg.scoring);
+        let llmTier: Tier | null = null;
+
+        // If no bump override, and LLM classifier is enabled, check ambiguous band
+        if (!forcedTier && cfg.llmClassifier.enabled) {
+          const score = scoringResult.score;
+          const { confidentTrivialThreshold, confidentComplexThreshold } = cfg.llmClassifier;
+
+          // Only call LLM for ambiguous scores
+          if (score > confidentTrivialThreshold && score < confidentComplexThreshold) {
+            try {
+              llmTier = await classifyWithCache(
+                { prompt },
+                cfg.llmClassifier,
+              );
+              if (llmTier) {
+                // Override the heuristic tier with LLM's judgment
+                scoringResult.tier = llmTier;
+                classifier = 'llm';
+              }
+            } catch {
+              // Fall back to heuristic on any error
+            }
+          }
+        }
+
+        // If bump is active, override the tier
+        if (forcedTier) {
+          scoringResult.tier = forcedTier;
+        }
 
         // Route to model (with session momentum)
         const routingResult = route(scoringResult, cfg, agentId, sessionKey, prompt);
 
-        // Record decision (fire-and-forget)
+        // Record bump feedback if applicable
+        if (classifier === 'bump' && sessionKey && forcedTier) {
+          recordBump(
+            sessionKey,
+            agentId,
+            scoringResult.tier,  // what heuristic would have chosen
+            forcedTier,
+            prompt.slice(0, 100),
+            scoringResult.score,
+          );
+        }
+
+        // Record decision
         if (cfg.stats.enabled && isDbEnabled()) {
           try {
             insertDecision({
@@ -72,8 +135,11 @@ export default definePluginEntry({
               promptLength: prompt.length,
               complexityScore: scoringResult.score,
               tier: routingResult.tier,
+              rawTier: routingResult.rawTier,
+              llmTier,
               modelChosen: routingResult.model,
               signals: scoringResult.signals,
+              classifier,
               experimentId: routingResult.experimentId,
               experimentVariant: routingResult.experimentVariant,
             });
@@ -87,26 +153,19 @@ export default definePluginEntry({
     );
 
     // Register agent_end hook (placeholder for future telemetry)
-    api.registerHook('agent_end', () => {
-      // Future: capture post-run telemetry (latency, token count, etc.)
-    });
+    api.registerHook('agent_end', () => {});
 
     // Register HTTP routes
-    // Note: OpenClaw HTTP routes use raw IncomingMessage/ServerResponse, not Express.
-    // Our api.ts handlers need to be adapted to work with the raw Node API.
     const routes: Array<{ path: string; handler: (req: IncomingMessage, res: ServerResponse) => void }> = [
       { path: '/smart-router/stats', handler: wrapJsonHandler(handleStats) },
       { path: '/smart-router/decisions', handler: wrapJsonHandler(handleDecisions) },
       { path: '/smart-router/config', handler: wrapJsonHandler(handleConfigPatch, handleConfigGet) },
       { path: '/smart-router/experiments', handler: wrapJsonHandler(handleExperimentsCreate, handleExperimentsGet) },
+      { path: '/smart-router/bump', handler: wrapJsonHandler(handleBumpApi) },
     ];
 
     for (const r of routes) {
-      api.registerHttpRoute({
-        path: r.path,
-        handler: r.handler,
-        auth: 'gateway',
-      });
+      api.registerHttpRoute({ path: r.path, handler: r.handler, auth: 'gateway' });
     }
 
     // Experiment stop (prefix match for :id param)
@@ -138,10 +197,6 @@ export default definePluginEntry({
 
 // ---------- Helpers ----------
 
-/**
- * Wrap our JSON API handlers to work with raw Node http.
- * Supports method-based dispatch (POST handler, GET handler).
- */
 function wrapJsonHandler(
   postOrOnlyHandler: (req: ParsedRequest, res: JsonResponse) => void,
   getHandler?: (req: ParsedRequest, res: JsonResponse) => void,
@@ -150,19 +205,15 @@ function wrapJsonHandler(
     const method = req.method?.toUpperCase() ?? 'GET';
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
-    // Parse query params
     const query: Record<string, string> = {};
     for (const [k, v] of url.searchParams) query[k] = v;
 
-    // Parse URL params (extract :id from path)
     const params: Record<string, string> = {};
     const pathParts = url.pathname.split('/').filter(Boolean);
-    // For /smart-router/experiments/:id/stop pattern
     if (pathParts.length >= 4 && pathParts[1] === 'experiments') {
       params['id'] = pathParts[2]!;
     }
 
-    // Parse body for POST
     let body: unknown = {};
     if (method === 'POST') {
       body = await readJsonBody(req);
@@ -184,17 +235,13 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString()));
-      } catch {
-        resolve({});
-      }
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
+      catch { resolve({}); }
     });
     req.on('error', () => resolve({}));
   });
 }
 
-// Simple request/response wrappers so api.ts doesn't need to change much
 export interface ParsedRequest {
   method: string;
   query: Record<string, string>;
@@ -207,19 +254,14 @@ export class JsonResponse {
   private _status = 200;
   constructor(private res: ServerResponse) {}
 
-  status(code: number): this {
-    this._status = code;
-    return this;
-  }
+  status(code: number): this { this._status = code; return this; }
 
   json(data: unknown): void {
     this.res.writeHead(this._status, { 'Content-Type': 'application/json' });
     this.res.end(JSON.stringify(data));
   }
 
-  setHeader(name: string, value: string): void {
-    this.res.setHeader(name, value);
-  }
+  setHeader(name: string, value: string): void { this.res.setHeader(name, value); }
 
   send(body: string): void {
     this.res.writeHead(this._status);

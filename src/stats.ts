@@ -1,4 +1,4 @@
-import type { RoutingDecision, StatsQuery, StatsResult } from './types.js';
+import type { RoutingDecision, StatsQuery, StatsResult, BumpRecord } from './types.js';
 import type { Database as BetterSqliteDatabase, DatabaseConstructor } from 'better-sqlite3';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -53,6 +53,19 @@ CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON routing_decisions(timestam
 CREATE INDEX IF NOT EXISTS idx_decisions_tier ON routing_decisions(tier);
 CREATE INDEX IF NOT EXISTS idx_decisions_agent ON routing_decisions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_decisions_experiment ON routing_decisions(experiment_id);
+
+CREATE TABLE IF NOT EXISTS bumps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+  session_key TEXT,
+  agent_id TEXT,
+  original_tier TEXT NOT NULL,
+  bumped_to_tier TEXT NOT NULL,
+  prompt_preview TEXT,
+  complexity_score REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bumps_timestamp ON bumps(timestamp);
 `;
 
 export function initDb(dbPath: string): boolean {
@@ -104,7 +117,12 @@ export function insertDecision(decision: RoutingDecision): void {
     decision.tier,
     decision.modelChosen,
     decision.modelDefault ?? null,
-    JSON.stringify(decision.signals),
+    JSON.stringify({
+      ...decision.signals,
+      rawTier: decision.rawTier,
+      llmTier: decision.llmTier,
+      classifier: decision.classifier,
+    }),
     decision.experimentId ?? null,
     decision.experimentVariant ?? null,
   );
@@ -226,6 +244,22 @@ export function pruneOldDecisions(retentionDays: number): number {
     `DELETE FROM routing_decisions WHERE datetime(timestamp) < datetime('now', ? || ' days')`,
   ).run(-retentionDays);
   return result.changes;
+}
+
+export function insertBumpRecord(record: BumpRecord): void {
+  if (!db) return;
+  db.prepare(`
+    INSERT INTO bumps
+      (session_key, agent_id, original_tier, bumped_to_tier, prompt_preview, complexity_score)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    record.sessionKey,
+    record.agentId ?? null,
+    record.originalTier,
+    record.bumpedToTier,
+    record.promptPreview,
+    record.complexityScore,
+  );
 }
 
 // ---------- DB helpers for experiments module ----------

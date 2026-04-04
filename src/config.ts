@@ -1,4 +1,5 @@
 import type { PluginConfig, ScoringWeights, ScoringThresholds } from './types.js';
+export type { LlmClassifierConfig } from './types.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -44,6 +45,14 @@ export const DEFAULT_CONFIG: PluginConfig = {
     shortMessageThreshold: 20,
     weights: { ...DEFAULT_WEIGHTS },
     thresholds: { ...DEFAULT_THRESHOLDS },
+  },
+  llmClassifier: {
+    enabled: false,
+    ollamaUrl: 'http://mac-mini.tailcd0984.ts.net:11434',
+    model: 'gemma4:e4b',
+    timeoutMs: 1500,
+    confidentTrivialThreshold: 0.15,
+    confidentComplexThreshold: 0.85,
   },
   stats: {
     enabled: true,

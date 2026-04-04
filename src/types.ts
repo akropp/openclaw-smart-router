@@ -55,6 +55,17 @@ export interface DashboardConfig {
   enabled: boolean;
 }
 
+export interface LlmClassifierConfig {
+  enabled: boolean;
+  ollamaUrl: string;
+  model: string;
+  timeoutMs: number;
+  /** Heuristic scores below this are "confidently simple" — skip LLM */
+  confidentTrivialThreshold: number;
+  /** Heuristic scores above this are "confidently complex" — skip LLM */
+  confidentComplexThreshold: number;
+}
+
 export interface PluginConfig {
   enabled: boolean;
   defaultTier: Tier;
@@ -67,6 +78,7 @@ export interface PluginConfig {
     weights: ScoringWeights;
     thresholds: ScoringThresholds;
   };
+  llmClassifier: LlmClassifierConfig;
   stats: StatsConfig;
   experiments: ExperimentsConfig;
   dashboard: DashboardConfig;
@@ -81,11 +93,23 @@ export interface RoutingDecision {
   promptLength: number;
   complexityScore: number;
   tier: Tier;
+  rawTier?: Tier;        // tier before momentum
+  llmTier?: Tier | null; // tier from LLM classifier (null = skipped/failed)
   modelChosen: string;
   modelDefault?: string;
   signals: ScoringSignals;
+  classifier?: 'heuristic' | 'llm' | 'bump'; // which classifier drove the decision
   experimentId?: string;
   experimentVariant?: string;
+}
+
+export interface BumpRecord {
+  sessionKey: string;
+  agentId?: string;
+  originalTier: Tier;
+  bumpedToTier: Tier;
+  promptPreview: string;
+  complexityScore: number;
 }
 
 export interface Experiment {

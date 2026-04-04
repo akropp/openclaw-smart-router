@@ -21,6 +21,7 @@ const BASE_CONFIG: PluginConfig = {
     weights: { length: 0.15, code: 0.25, question: 0.25, keywords: 0.2, structure: 0.15 },
     thresholds: { trivial: 0.2, standard: 0.5, complex: 0.8 },
   },
+  llmClassifier: { enabled: false, ollamaUrl: '', model: '', timeoutMs: 1500, confidentTrivialThreshold: 0.15, confidentComplexThreshold: 0.85 },
   stats: { enabled: false, dbPath: '/tmp/test.db', retentionDays: 30 },
   experiments: { enabled: false },
   dashboard: { enabled: true },

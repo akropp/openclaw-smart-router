@@ -3,6 +3,7 @@ import { queryStats, queryDecisions } from './stats.js';
 import { getConfig, patchConfig } from './config.js';
 import { persistConfig } from './persist.js';
 import { listExperiments, createExperiment, stopExperiment } from './experiments.js';
+import { registerBump } from './bump.js';
 import type { CreateExperimentInput } from './experiments.js';
 import type { Tier } from './types.js';
 
@@ -101,6 +102,24 @@ export function handleExperimentsCreate(req: ParsedRequest, res: JsonResponse): 
 
   const experiment = createExperiment(input);
   res.status(201).json(experiment);
+}
+
+// POST /smart-router/bump — register a bump via API (alternative to /bump command)
+export function handleBumpApi(req: ParsedRequest, res: JsonResponse): void {
+  if (req.method === 'GET') {
+    res.json({ info: 'POST with { sessionKey, tier? } to register a bump' });
+    return;
+  }
+
+  const body = req.body as { sessionKey?: string; tier?: string };
+  if (!body.sessionKey) {
+    res.status(400).json({ error: 'sessionKey is required' });
+    return;
+  }
+
+  const tier = (body.tier as Tier) || 'complex';
+  registerBump(body.sessionKey, tier);
+  res.json({ ok: true, sessionKey: body.sessionKey, tier });
 }
 
 // POST /smart-router/experiments/:id/stop
