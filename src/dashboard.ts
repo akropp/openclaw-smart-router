@@ -300,7 +300,7 @@ async function loadExperiments() {
           '</div>' +
         '</div>' +
         (e.status === 'active'
-          ? '<button class="danger" onclick="stopExp(\'' + e.id + '\')">Stop</button>'
+          ? '<button class="danger" onclick="stopExp(&quot;' + e.id + '&quot;)">Stop</button>'
           : '') +
       '</div>';
     }).join('');
